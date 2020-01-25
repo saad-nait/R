@@ -1,0 +1,226 @@
+---
+title: "Kmeans clusturing tunning"
+author: "Saad"
+date: "1/10/2020"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#install.packages("ari")
+#install.packages("scatterplot3d") 
+library(ari)
+library("scatterplot3d")
+
+#????????????????????????FONCTIONS????????????????????????
+
+#************fonction partage
+fct_partage <- function(n,m) {
+  #n = nombre d'obser et m=nbre de paquet
+  paq=c(rep(1:m,each=n%/%m),sample(1:m,(n%%m)))
+  paq=sample(paq)
+  return(paq)
+}
+
+
+#************fonction Affectation
+
+affectation <- function(df,c) {
+  cl2=0
+  for (i in 1:dim(df)[1] ) {
+    m=rbind(df[i,],as.matrix(c$centers))
+    d=as.matrix(dist(m))[,1]
+    d=as.vector(d[-1])
+    cl2[i]=which.min(d)
+  }
+  return(cl2)
+}
+
+#************ Generer les patatoides
+
+generateData <- function(k,n,p,d=8,e=1) {
+  #*****************************************
+  #cette fct permet de generer le jeu de donnees en se basant sur la lois normale 
+  # le jeu de donnees est compose de k patatoids (k grp) generer a partir d'une loi normale d'ecartype e
+  #-------------- parametres : -------------
+  # k : nombre de grp
+  # n : nbr d'observations du jeu de donnee
+  # p : dimension du jeu de donnee
+  # d : la distance entre patatoids
+  # e : ecart-type entre patatoids
+  #*****************************************
+  #*****************************************
+  # i=1;k=10;d=8;d1=8;l=n%/%k;p=2;n=909;
+  l=n%/%k # k peut changer en cours d'execution vaut mieu calculer la longeur de chaque grp 
+  df=as.matrix(replicate(p,rnorm(l + n%%k,sd=e)))
+  
+  #fonction recurcive qui permetra la cree des patatoids
+  distrubute <- function(k,i=1,d,d1) {
+    if (k>1) {
+      col1=replicate(i-1,rnorm(l,sd=e)) # on rempli l'ensemble des parametres qui sont avant celui qui est genere avec un centre eloigne des autres de d
+      col2=rnorm(l, mean=d, sd=e)    # on rempli le parametres qui est centre sur la point ; (,d,0, ...)
+      col3=replicate(p-i,rnorm(l,sd=e))# on rempli l'ensemble des parametres qui sont apres celui qui est genere avec un centre eloigne des autres de d
+      df<<-rbind(df,cbind(col1,col2,col3)) # on rassemble le tout dans celui ci
+      k=k-1
+    }
+    if (k>1) {
+      col1=replicate(i-1,rnorm(l,sd=e))
+      col2=rnorm(l, mean = -d, sd=e)  # idem ici sauf ici le centre du parametre sera (,-d,0,...)
+      col3=replicate(p-i,rnorm(l,sd=e))
+      df<<-rbind(df,cbind(col1,col2,col3))
+    }
+    if (k>1) {
+      if (i==p) { i=0;d=d+d1; } # cela pour recomancer les parametre a zero si le nombre de grp est superieur a celui de parametre
+      i=i+1;k=k-1;
+      distrubute(k,i,d,d1)# on boucle en recursivite
+    }
+  }
+  
+  d1=d # en recurcivite on peut pas garder la valeur precedente d'une variable on garde en d1 le pas
+  distrubute(k,d=d,d1=d1)
+  
+  return(df)
+}
+
+
+#????????????????????????/FONCTIONS????????????????????????
+
+
+
+compare <- function(k,n,p,m,d=8,e=1) {
+
+  #&&&&&&&&&&&&&&&&&&&&&&** etape 1 **&&&&&&&&&&&&&&&&&&&&
+  #>>>>>>>> on fabrique le jeu de données
+  # objectif : avoir df de n observation et de p parametres
+  #            suivant une lois normale en k groupe
+  
+  df=generateData(k,n,p,d,e)
+  #plot(df)
+  
+  #&&&&&&&&&&&&&&&&&&&&&&** etape 2 : **&&&&&&&&&&&&&&&&&&&&
+  #>>>>>>>> on genere le cl0
+  # objectif : avoir un vecteur d'etiquette de groupe
+  #            en se basant sur le nombre k (nbr de patatoides voulu)
+  
+  cl0=rep(1,n%/%k + n%%k) # meme chose ici le reste est pour le premier grp
+  cl0=c(cl0,rep(2:k,each=n%/%k))
+  
+  #&&&&&&&&&&&&&&&&&&&&&&** etape 3 : **&&&&&&&&&&&&&&&&&&&&
+  #>>>>>>>> on genere le cl1
+  # objectif : avoir un vecteur d'etiquette de groupe
+  #            en utilisant la methode kmeans (en laissant le jeu entier)
+  
+  #---- debut du timer 1
+  ptm = Sys.time()
+  cl1=kmeans(df,k)
+  timercl1=Sys.time()-ptm 
+  #---- fin timer 1
+  
+  #&&&&&&&&&&&&&&&&&&&&&&** etape 4 : **&&&&&&&&&&&&&&&&&&&&
+  #>>>>>>>> on genere le cl2
+  # objectif : avoir un vecteur d'etiquette de groupe
+  #            en utilisant la methode kmeans sur m paquetes
+  
+  
+  #>>>>>>>> on divise le jeu de donnees en m paquet
+  # objectif : avoir un vecteur d'indice d'element de chaque paquet
+  
+  paquet=fct_partage(n,m)
+  #table(paquet)
+
+  #>>>>>>>> on applique kmeans sur chaque paquette separement
+  # objectif : avoir un vecteur center_M contenant le centre de chaque paquet
+  
+  #---- debut timer 2 pour evaluer le temps necessaire pour calculer kmeans en divisant en paquets
+  ptm = Sys.time()
+  centres_M=data.frame()
+  
+  for (i in 1:m) {
+    t=kmeans(df[paquet==i,],k)
+    centres_M=rbind(centres_M,t$centers) 
+  }
+  #>>>>>>>> on applique kmeans sur les centres retrouve
+  centre_F=kmeans(centres_M,k)
+  
+  cl2=affectation(df,centre_F)
+  
+  timercl2=Sys.time()-ptm 
+  #timer end
+  
+  #####################################"
+  
+  #*****comparer les indices et les timer
+  
+  #********Indce ARI
+  ari1=aricode::ARI(cl0,cl1$cluster) #Indice entre cl0 et cl1
+  ari2=aricode::ARI(cl0,cl2) #Indice entre cl0 et cl2
+  ari3=aricode::ARI(cl1$cluster,cl2) #Indice entre cl1 et cl2
+  #---- graph des grp + centres
+  if (p==3) {
+    par(mfrow=c(1,2))
+    scatterplot3d(df,color = cl1$cluster, main = "en se basant sur cl1")
+    #points(cl1$centers, col = k:1, pch = 8)
+    
+    scatterplot3d(df,color = cl2, main = "en se basant sur cl2")
+    #points(centre_F$centers, col = k:1, pch = 8)  
+  }else {
+    par(mfrow=c(1,2))
+    plot(df[,1],df[,2], col = cl1$cluster, main = "en se basant sur cl1")
+    points(cl1$centers, col = k:1, pch = 8)
+    
+    plot(df[,1],df[,2], col = cl2,main = "en se basant sur cl2")
+    points(centre_F$centers, col = k:1, pch = 8)
+  }
+  print("indice ari entre cl0 et cl1");print(ari1)
+  print("indice ari entre cl0 et cl2");print(ari2)
+  print("indice ari entre cl1 et cl2");print(ari3)
+  print("temps pour kmeans normale");print(timercl1)
+  print("temps pour kmeans en divisant en plusieurs paquet");print(timercl2)
+}
+```
+
+On commence par comparer l'utilisation de kmeans sur tout le jeu de donnee et en separant le jeu de donnees en plusieur paquets
+
+```{r}
+# k represente le nomrbre de patatoides voulu
+# n le nombre d'observations
+# p la dimensiont du jeu de donnees cad le nombres de colonnes
+# m le nombre de paquets
+compare(k=3,n=12000,p=2,m=4)
+
+```
+
+le graphe on fait comme le precedent en changant l'ecart-type des patatoides
+
+
+```{r}
+# e represente l'ecarttype
+compare(3,12000,2,4,e=1.5)
+```
+
+On remarque que quand k est petit kmeans fonctionne bien que ca soit sur tout le jeu de donnee ou en le divisant en plusieurs paquets
+
+le graphe suivant on essai la meme chose mais en 3 dimension :
+
+```{r}
+# d represente la distance entre les patatoids
+compare(7,12000,3,4,d=10)
+```
+
+Idem qu'au precedent sauf avec un plus grand ecart-type :
+
+
+```{r}
+compare(7,12000,3,4,d=10,e=1.5)
+```
+
+
+conclusion : apres avoir essayer de changer les differents parametre on constate que plus les patatoids sont ecarter plus kmeans est parfaite et cela dans n'importe quelle dimension. aussi plus le nombre de paquets est grand plus c'est precis
